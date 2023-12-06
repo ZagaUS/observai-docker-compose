@@ -1,0 +1,55 @@
+receivers:
+  otlp:
+    protocols:
+      grpc:
+      http:
+
+processors:
+  batch:
+  memory_limiter:
+    check_interval: 5s
+    limit_mib: 4000
+    spike_limit_mib: 500
+
+exporters:
+  
+  logging:
+    loglevel: debug     
+
+  kafka/traces:
+    brokers: 
+      - kafka-broker:9092
+    topic: observai-main-traces-1
+    encoding: otlp_json
+    protocol_version: 3.4.0
+
+  kafka/metrics:
+    brokers: 
+      - kafka-broker:9092
+    topic: observai-main-metrics-1
+    encoding: otlp_json
+    protocol_version: 3.4.0
+
+  kafka/logs:
+    brokers: 
+      - kafka-broker:9092
+    topic: observai-main-logs-1
+    encoding: otlp_json
+    protocol_version: 3.4.0 
+
+service:
+  pipelines:
+    traces:
+      receivers: [otlp]
+      processors: [batch]
+      exporters: [kafka/traces]
+
+    metrics:
+      receivers: [otlp]
+      processors: [batch]
+      exporters: [kafka/metrics]
+
+    logs:
+      receivers: [otlp]
+      processors: [batch]
+      exporters: [kafka/logs]

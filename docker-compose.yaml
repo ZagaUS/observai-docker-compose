@@ -1,0 +1,192 @@
+version: '3.8'
+
+services:
+
+## Kafka
+
+  # Zookeeper
+  kafka-zookeeper:
+    image: docker.io/confluentinc/cp-zookeeper:latest
+
+    container_name: kafka-zookeeper
+
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+
+    ports:
+      - 22181:2181
+
+    networks:
+      - observai_network
+
+
+  # Broker
+  kafka-broker:
+    image: docker.io/confluentinc/cp-kafka:latest
+
+    container_name: kafka-broker
+
+    depends_on:
+      - zookeeper
+
+    environment: 
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: 'kafka-zookeeper:2181'
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://localhost:29092,PLAINTEXT_HOST://kafka-broker:9092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+
+    ports:
+      - 9092:9092
+
+    networks:
+      - observai_network
+
+## MongoDB
+  mongodb:
+    image: docker.io/library/mongo:latest
+
+    container_name: mongodb
+
+    depends_on:
+      - zookeeper
+
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: root
+      MONGO_INITDB_ROOT_PASSWORD: rootpassword
+
+    privileged: true
+
+    ports:
+      - 27018:27017
+
+    networks:
+      - observai_network
+
+    volumes:
+      - type: bind
+        source: ./mongodb
+        target: /data/db
+
+## postgresql
+  postgresql:
+    image: docker.io/library/postgres:14-alpine
+
+    container_name: postgresql14
+
+    environment:
+        POSTGRES_PASSWORD: admin123
+        POSTGRES_USER: adminuser
+        POSTGRES_DB: sample-database
+
+    privileged: true
+
+    ports:
+      - 5432:5432
+
+    networks:
+      - observai_network
+
+    volumes:
+      - type: bind
+        source: ./postgresql14
+        target: /var/lib/postgresql/data
+
+## Opentelemetry
+  opentelemetry-collector:
+    image: docker.io/otel/opentelemetry-collector-contrib:latest
+
+    container_name: opentelemetry-collector
+
+    depends_on:
+      - zookeeper
+
+    ports:
+      - 4317:4317 
+      - 4318:4318
+
+    networks:
+      - observai_network
+
+    volumes:
+      - type: bind
+        source: ./opentelemetry
+        target: /etc/prometheus
+
+## Observ_AI
+
+  # Query API
+  observai_query_api:
+    image: quay.io/zagaos/observai-query-api
+
+    container_name: observai-query-api
+
+    depends_on:
+      - kafka_broker
+      - mongodb
+      - opentelemetry-collector
+
+    environment:
+        APP_PORT: 8081
+        MONGODB_URL: mongodb://root:rootpassword@mongodb:27017/test
+    ports:
+      - 8081:8081
+
+    networks:
+      - observai_network
+
+  # Persistence API
+  observai_persistance_api:
+    image: quay.io/zagaos/observai-persistence-api
+
+    container_name: observai-persistence-api
+
+    depends_on:
+      - kafka_broker
+      - mongodb
+      - opentelemetry-collector
+
+    environment:
+        DEV_APP_PORT: 8082
+        MONGODB_URL: 'mongodb://root:rootpassword@mongodb:27017/test'
+        TRACE_BOOTSTRAP_URL: 'kafka-broker:9092'
+        TRACE_TOPIC: 'observai-main-traces-1'
+        TRACE_OFFSET_RESET: 'latest'
+        LOG_BOOTSTRAP_URL: 'kafka-broker:9092'
+        LOG_TOPIC: 'observai-main-logs-1'
+        LOG_OFFSET_RESET: 'latest'
+        METRIC_BOOTSTRAP_URL: 'kafka-broker:9092'
+        METRIC_TOPIC: 'observai-main-metrics-1'
+        METRIC_OFFSET_RESET: 'latest'
+
+    ports:
+      - 8082:8082
+
+    networks:
+      - observai_network
+
+  # Dashboard
+  observai_dashboard:
+    image: quay.io/zagaos/observai-dashboard
+
+    container_name: observai-dashboard
+
+    environment:
+
+    depends_on:
+      - observai_persistance_api
+      - observai_query_api
+
+    ports:
+      - 8080:8080
+
+    networks:
+      - observai_network
+
+
+networks:
+  observai_network:
+    driver: bridge
